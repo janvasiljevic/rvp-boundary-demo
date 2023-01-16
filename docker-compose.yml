@@ -1,0 +1,177 @@
+
+version: "3.8"
+
+services: 
+  # Keycloak server, used for authentication
+  # It is started in dev mode so that no SSL certs are needed
+  # Go to http://localhost:8080/admin to login
+  # It is extremely important to set KC_HOSTNAME or else OIDC wont work
+  keycloak: 
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:20.0.2
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+      - DB_VENDOR=POSTGRES
+      - DB_ADDR=db
+      - DB_PORT=5432
+      - DB_DATABASE=db_keycloak
+      - DB_USER=user_keycloak
+      - DB_PASSWORD=changeme
+      - KC_HOSTNAME=localhost
+    ports:
+      - 8080:8080
+    entrypoint: ["/opt/keycloak/bin/kc.sh"]
+    command: ["start-dev"]
+    networks: 
+    - "infra"
+    
+  # This is the main postgres database for Boundary and Keycloak
+  # It needs to be version >= 11
+  db:
+    image: postgres:15.1-alpine
+    container_name: db
+    ports:
+      - 5432:5432
+    volumes: 
+      - ${PWD}/configs/postgres/docker_postgres_init.sql:/docker-entrypoint-initdb.d/docker_postgres_init.sql
+    environment:
+      - POSTGRES_DB=root
+      - POSTGRES_USER=root
+      - POSTGRES_PASSWORD=changeme
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d db_boundary -U user_boundary"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+    networks: 
+      - "infra"
+
+  # This initializes the Boundary database
+  # Connects to db/db_boundary with user user_boundary and creates the schema
+  db-init:
+    container_name: boundary-db-init
+    image: hashicorp/boundary:0.11
+    command: ["database", "init", "-skip-auth-method-creation", "-skip-host-resources-creation", "-skip-scopes-creation", "-skip-target-creation", "-config",  "/boundary/boundary.hcl"]
+    volumes:
+      - ${PWD}/configs/boundary/:/boundary
+    environment:
+      - BOUNDARY_PG_URL=postgresql://user_boundary:changeme@db/db_boundary?sslmode=disable
+    cap_add:
+      - IPC_LOCK
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: 
+    - "infra"
+
+  # The main Boundary server
+  boundary:
+    container_name: boundary
+    image: hashicorp/boundary:0.11
+    build:
+      context: ./configs/dockerfiles
+      dockerfile: $PWD/configs/dockerfiles/boundary.Dockerfile
+    # command: ["server", "-config", "/boundary/boundary.hcl"]
+    volumes:
+      - "${PWD}/configs/boundary/:/boundary"
+    ports:
+      - "9200:9200"
+      - "9201:9201"
+      - "9202:9202"
+    environment:
+      - BOUNDARY_PG_URL=postgresql://user_boundary:changeme@db/db_boundary?sslmode=disable
+      - HOSTNAME=boundary
+    cap_add:
+      - IPC_LOCK
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    # network_mode: "host"
+    healthcheck:
+      test: ["CMD", "wget", "-O-", "http://boundary:9200"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+    networks: 
+      - "rk-network"
+      - "infra"
+
+  # Vasult instance
+  vault:
+    container_name: vault
+    image: vault:1.12.2
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    networks: 
+      - "infra"
+      - "rk-network"
+    entrypoint: vault server -dev -dev-listen-address="0.0.0.0:8200" -dev-root-token-id="root"
+
+  # Boundary controller is the last service to start and may not be fully up
+  # by the time the docker compose command returns, so we force a wait by
+  # depending a placeholder on the controller healthcheck
+  wait:
+    image: busybox:latest
+    command: ["sleep", "1"]
+    depends_on:
+      boundary:
+        condition: service_healthy
+
+  # Our "virtual" machines
+
+  # VM 01 is accessible via username/ password, which we store in Vault
+  vm-01:
+    container_name: vm-01
+    image: linuxserver/openssh-server:version-9.0_p1-r2
+    environment:
+      - SUDO_ACCESS=true #optional
+      - PASSWORD_ACCESS=true #optional
+      - USER_PASSWORD=12345678 #optional
+      - USER_NAME=jan #optional
+    networks: 
+      - "rk-network"
+
+  # VM 02 is accessible via public key (and username), which we store in Vault
+  vm-02:
+    container_name: vm-02
+    image: linuxserver/openssh-server:version-9.0_p1-r2
+    networks: 
+      - "rk-network"
+    volumes:
+      - ${PWD}/configs/openssh/vm02/key.pub:/config/key.pub
+    environment:
+      - PUBLIC_KEY_FILE=/config/key.pub
+      - USER_NAME=vm02user 
+
+  vm-03:
+    container_name: vm-03
+    build:
+      context: ./configs/dockerfiles
+      dockerfile: $PWD/configs/dockerfiles/vm-ubuntu.Dockerfile
+    networks: 
+      rk-network:
+        ipv4_address: 10.1.0.103
+
+  vm-04:
+    container_name: vm-04
+    build:
+      context: ./configs/dockerfiles
+      dockerfile: $PWD/configs/dockerfiles/vm-ubuntu.Dockerfile
+    networks: 
+      rk-network:
+        ipv4_address: 10.1.0.104
+
+
+# We configure rk-network to use static IP addresses for the VMs
+# So we can configure Vault OTP
+networks:
+  rk-network:
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.1.0.0/24
+  infra:
+   
