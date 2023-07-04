@@ -1,0 +1,171 @@
+github: {
+  shape: image
+  icon: ./github.svg
+}
+
+gitlab: {
+  shape: image
+  icon: ./gitlab.svg
+}
+
+user: {
+  shape: person
+}
+
+direction: right
+
+infra: {
+  style: {
+    stroke: green
+  }
+
+  keycloak: {
+    shape: image
+    icon: ./keycloak.svg
+  }
+
+  postgres: {
+    shape: image
+    icon: ./postgres.svg
+  }
+
+  boundary: {
+    label: ""
+    shape: image
+    icon: ./boundary.svg
+  }
+
+  vault: {
+    label: ""
+    shape: image
+    icon: ./vault.svg
+  }
+
+  vault <-> boundary: {
+    label: "Credential store"
+  }
+
+  boundary <-> keycloak: {
+    label: "OIDC connection"
+  }
+
+  keycloak -> postgres 
+
+  boundary -> postgres 
+}
+
+private: {
+  style: {
+    stroke: orange
+  }
+
+  vm1: {
+    label: "VM01"
+    shape: image
+    icon: ./docker.svg
+  }
+
+  vm2: {
+    label: "VM02"
+    shape: image
+    icon: ./docker.svg
+  }
+
+  vm3: {
+    label: "VM03"
+    shape: image
+    icon: ./docker.svg
+  }
+
+  vm4: {
+    label: "VM04"
+    shape: image
+    icon: ./docker.svg
+  }
+}
+
+privatenotes: |md
+  # Private network
+  Represents a private network with 4 VMs running on it.  
+  Vault and Boundary have access to this network.  
+  The idea is they are the only ones with access to the private network.
+| { near: bottom-center }
+
+
+notes: |md
+  # Notes on vm3 & vm4
+  - Both are running vault-ssh-helper
+  - Ubuntu based images are used
+| { near: center-right }
+
+title: |md
+  # Infrastructure diagram
+| { near: top-center }
+
+user -> infra.boundary
+
+infra.boundary -> private.vm1: {
+  label: "Target 1"
+  style: {
+    stroke: orange
+    font-color: orange
+  }
+}
+
+infra.boundary -> private.vm2: {
+  label: "Target 2"
+  style: {
+    stroke: orange
+    font-color: orange
+  }
+}
+
+infra.boundary -> private.vm3: {
+  label: "Target 3"
+  style: {
+    stroke: orange
+    font-color: orange
+  }
+}
+
+infra.boundary -> private.vm4: {
+  label: "Target 4"
+  style: {
+    stroke: orange
+    font-color: orange
+  }
+}
+
+infra.vault -> private.vm3: {
+  label: "Vault SSH OTP"
+  style: {
+    stroke-dash: 5
+    stroke: red
+    font-color: red
+  }
+}
+
+infra.vault -> private.vm4: {
+  label: "Vault SSH OTP"
+  style: {
+    stroke-dash: 5
+    stroke: red
+    font-color: red
+  }
+}
+
+infra.keycloak -> github: {
+  label: "OIDC"
+  style: {
+    stroke: purple
+    font-color: purple 
+  }
+}
+
+infra.keycloak -> gitlab: {
+  label: "OIDC"
+  style: {
+    stroke: purple
+    font-color: purple 
+  }
+}
